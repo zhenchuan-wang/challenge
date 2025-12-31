@@ -35,7 +35,7 @@ class SupportDocumentLoader:
         Raises:
             FileNotFoundError: If the specified data path does not exist
         """
-        raise NotImplementedError("This function is not yet implemented.")
+        self.data_path = data_path
 
     def get_json_content(self, data: Dict[str, Any]) -> str:
         """
@@ -57,9 +57,20 @@ class SupportDocumentLoader:
             Queue: {}
             Priority: {}
         """
-        raise NotImplementedError("This function is not yet implemented.")
-
-
+        str_subject = data.get("subject")
+        str_description = data.get("description")
+        str_resolution = data.get("resolution")
+        str_type = data.get("type")
+        str_queue = data.get("queue")
+        str_priority = data.get("priority")
+        result = {}
+        result["Subject"] = str_subject
+        result["Description"] = str_description
+        result["Resolution"] = str_resolution
+        result["Type"] = str_type
+        result["Queue"] = str_queue
+        result["Priority"] = str_priority
+        return str(result)
 
     def get_json_metadata(self, record: Dict[str, Any], support_type: str = None) -> Dict[str, Any]:
         """
@@ -93,8 +104,23 @@ class SupportDocumentLoader:
         Raises:
             ValueError: If support_type is not provided
         """
-        # Get the correct support type, either from parameter or from record
-        raise NotImplementedError("This function is not yet implemented.")
+        if support_type is None:
+            raise ValueError
+        metadata = {}
+        metadata["ticket_id"] = '_'.join([support_type, record.get(original_id)])
+        metadata["original_ticket_id"] = record.get("Ticket ID")
+        metadata["support_type"] = support_type
+        metadata["type"] = record.get("type")
+        metadata["queue"] = record.get("queue")
+        metadata["priority"] = record.get("priority")
+        metadata["language"] = record.get("language")
+        metadata["tags"] = record.get("tags")
+        metadata["source"] = record.get("source")
+        metadata["subject"] = record.get("source")
+        metadata["body"] = record.get("source")
+        metadata["answer"] = record.get("answer")
+        return metadata
+        
 
 
     def load_xml_tickets(self, file_path: Path, support_type: str) -> List[Document]:
@@ -133,7 +159,21 @@ class SupportDocumentLoader:
                 'source': 'xml'               # Source format identifier
             }
         """
-        raise NotImplementedError("This function is not yet implemented.")
+        if support_type is None:
+            raise ValueError
+        metadata = {}
+        metadata["ticket_id"] = '_xml_'.join([support_type, record.get(original_id)])
+        metadata["original_ticket_id"] = record.get("Ticket ID")
+        metadata["support_type"] = support_type
+        metadata["type"] = record.get("type")
+        metadata["queue"] = record.get("queue")
+        metadata["priority"] = record.get("priority")
+        metadata["language"] = record.get("language")
+        metadata["tags"] = record.get("tags")
+        metadata["source"] = record.get("source")
+        return metadata
+
+        
 
         
     def load_tickets(self) -> Dict[str, List[Document]]:
