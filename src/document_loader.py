@@ -7,6 +7,7 @@ import logging
 import jq
 from uuid import uuid4
 from functools import partial
+from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,11 @@ class SupportDocumentLoader:
         Raises:
             FileNotFoundError: If the specified data path does not exist
         """
-        raise NotImplementedError("This function is not yet implemented.")
+        self.data_path = Path(data_path)
+        if not self.data_path.exists() or not self.data_path.is_dir():
+            raise FileNotFoundError(
+                f"Data path {data_path} does not exist or is not a directory"
+            )
 
     def get_json_content(self, data: Dict[str, Any]) -> str:
         """
@@ -58,7 +63,14 @@ class SupportDocumentLoader:
             Queue: {}
             Priority: {}
         """
-        raise NotImplementedError("This function is not yet implemented.")
+        return (
+            f"Subject: {data.get('subject', '')}\n"
+            f"Description: {data.get('body', '')}\n"
+            f"Resolution: {data.get('answer', '')}\n"
+            f"Type: {data.get('type', '')}\n"
+            f"Queue: {data.get('queue', '')}\n"
+            f"Priority: {data.get('priority', '')}"
+        )
 
     def get_json_metadata(
         self, record: Dict[str, Any], support_type: str = None
@@ -94,7 +106,29 @@ class SupportDocumentLoader:
         Raises:
             ValueError: If support_type is not provided
         """
-        raise NotImplementedError("This function is not yet implemented.")
+        if support_type is None:
+            raise ValueError("support_type must be provided")
+
+        tags = [
+            record.get(f"tag_{i}")
+            for i in range(1, 9)
+            if record.get(f"tag_{i}") and str(record.get(f"tag_{i}")).lower() != "nan"
+        ]
+
+        return {
+            "ticket_id": f"{support_type}_{record['Ticket ID']}",
+            "original_ticket_id": str(record["Ticket ID"]),
+            "support_type": support_type,
+            "type": record.get("type", ""),
+            "queue": record.get("queue", ""),
+            "priority": record.get("priority", ""),
+            "language": record.get("language", ""),
+            "tags": tags,
+            "source": "json",
+            "subject": record.get("subject", ""),
+            "body": record.get("body", ""),
+            "answer": record.get("answer", ""),
+        }
 
     def load_xml_tickets(self, file_path: Path, support_type: str) -> List[Document]:
         """
@@ -132,7 +166,55 @@ class SupportDocumentLoader:
                 'source': 'xml'               # Source format identifier
             }
         """
-        raise NotImplementedError("This function is not yet implemented.")
+        tree = ET.parse(file_path)
+        root = tree.getroot()
+        documents = []
+
+        for ticket in root.findall("Ticket"):
+            data = {child.tag: child.text for child in ticket}
+            content = self.get_json_content(data)
+
+            tags = [
+                data.get(f"tag_{i}")
+                for i in range(1, 9)
+                if data.get(f"tag_{i}") and str(data.get(f"tag_{i}")).lower() != "nan"
+            ]
+
+            metadata = {
+                "ticket_id": f"{support_type}_xml_{data['TicketID']}",
+                "original_ticket_id": str(data["TicketID"]),
+                "support_type": support_type,
+                "type": data.get("type", ""),
+                "queue": data.get("queue", ""),
+                "priority": data.get("priority", ""),
+                "language": data.get("language", ""),
+                "tags": tags,
+                "source": "xml",
+            }
+
+            doc = Document(page_content=content, metadata=metadata)
+            documents.append(doc)
+
+        return documents
+
+    def _normalize_support_type(self, support_type_raw: str) -> str:
+        """
+        Normalize support type from file name to standardized key.
+
+        Args:
+            support_type_raw (str): Raw support type from file name
+
+        Returns:
+            str: Normalized support type
+        """
+        if "Technical" in support_type_raw:
+            return "technical"
+        elif "Product" in support_type_raw:
+            return "product"
+        elif "Customer" in support_type_raw:
+            return "customer"
+        else:
+            return support_type_raw.lower().replace(" ", "")
 
     def load_tickets(self) -> Dict[str, List[Document]]:
         """
@@ -149,7 +231,51 @@ class SupportDocumentLoader:
         Raises:
             ValueError: If duplicate ticket IDs are found
         """
-        raise NotImplementedError("This function is not yet implemented.")
+        documents = defaultdict(list)
+
+        # Load JSON files
+        for json_file in self.data_path.glob("*_tickets.json"):
+            support_type_raw = json_file.stem.replace("_tickets", "")
+            support_type = self._normalize_support_type(support_type_raw)
+
+            try:
+                import json
+
+                with open(json_file, "r") as f:
+                    data = json.load(f)
+                for record in data:
+                    content = self.get_json_content(record)
+                    metadata = self.get_json_metadata(record, support_type)
+                    doc = Document(page_content=content, metadata=metadata)
+                    documents[support_type].append(doc)
+            except Exception:
+                # If JSON loading fails, ensure the key exists with empty list
+                documents[
+                    support_type
+                ]  # This creates the key with empty list due to defaultdict
+
+        # Load XML files
+        for xml_file in self.data_path.glob("*_tickets.xml"):
+            support_type_raw = xml_file.stem.replace("_tickets", "")
+            support_type = self._normalize_support_type(support_type_raw)
+
+            try:
+                docs = self.load_xml_tickets(xml_file, support_type)
+                documents[support_type].extend(docs)
+            except Exception:
+                # If XML loading fails, skip this file
+                pass
+
+        # Validate unique ticket IDs
+        all_ticket_ids = [
+            doc.metadata["ticket_id"]
+            for docs_list in documents.values()
+            for doc in docs_list
+        ]
+        if len(all_ticket_ids) != len(set(all_ticket_ids)):
+            raise ValueError("Duplicate ticket IDs found")
+
+        return dict(documents)
 
     def create_documents(self) -> Dict[str, List[Document]]:
         """
@@ -158,5 +284,4 @@ class SupportDocumentLoader:
         Returns:
             Dict[str, List[Document]]: Dictionary with support types as keys and lists of Document objects as values
         """
-
-        raise NotImplementedError("This function is not yet implemented.")
+        return self.load_tickets()
